@@ -1,25 +1,68 @@
-# generate_all.py
 import json
 import os
-from cities import cities  # Import source data
+from cities import cities  # Import cities from cities.py
 
-# Map name for consistency
-MAP_NAME = "Raman"
-
-# Teleport JSON template
-teleport_template = {
-    "m_Version": 1,
-    "Enabled": 1,
-    "Type": 0,
-    "Name": "",
-    "TelePos": {"x": 0.0, "y": 0.0, "z": 0.0},
-    "Radius": 25,
-    "TeleHeight": 0.0,
-    "Cooldown": 0,
-    "Message": ""
+# Define output directories
+output_dirs = {
+    "teleports": "teleports",
+    "airdrop_files": "airdrop_files",
+    "contaminated_areas_files": "contaminated_areas_files",
+    "spawn_points": "spawn_points",
+    "roaming_locations": "roaming_locations",
+    "contaminated_areas_xml": "contaminated_areas_xml"
 }
 
-# Roaming locations template
+# Create directories if they don't exist
+for dir_path in output_dirs.values():
+    os.makedirs(dir_path, exist_ok=True)
+
+# Keywords for contaminated areas
+contaminated_keywords = ["Industrial", "Military", "Antenna", "Mine", "Island", "Transformer"]
+
+# Templates
+airdrop_template = {
+    "m_Version": 2,
+    "Enabled": 1,
+    "Weight": 1.0,
+    "MissionMaxTime": 1200,
+    "MissionName": "",
+    "Difficulty": 0,
+    "Objective": 0,
+    "Reward": "",
+    "ShowNotification": 1,
+    "Height": 450.0,
+    "Speed": 25.0,
+    "Container": "Random",
+    "FallSpeed": 4.5,
+    "DropLocation": {"x": 0.0, "z": 0.0, "Name": "", "Radius": 100.0},
+    "Infected": [],
+    "ItemCount": -1,
+    "InfectedCount": -1,
+    "AirdropPlaneClassName": "",
+    "Loot": []
+}
+
+contaminated_template = {
+    "m_Version": 2,
+    "Enabled": 1,
+    "Name": "",
+    "TriggerType": 1,
+    "Data": {
+        "Shape": 1,
+        "Radius": 150.0,
+        "Pos": [0.0, 0.0, 0.0]
+    },
+    "PPEffects": [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "VerticalLevels": 1,
+    "VerticalOffset": 0.0,
+    "ParticleLifeTime": 60.0,
+    "ParticleBirthRate": 2.0,
+    "SafePos": [0.0, 0.0, 0.0],
+    "SafeRadius": 5.0,
+    "Infected": [],
+    "InfectedCount": -1
+}
+
 roaming_template = {
     "m_Version": 1,
     "RoamingLocations": [],
@@ -31,76 +74,98 @@ roaming_template = {
     "NoGoAreas": []
 }
 
-# Keywords for contaminated areas
-contaminated_keywords = ["Industrial", "Military", "Antenna", "Mine", "Island", "Transformer"]
+# 1. Teleports_Raman.json
+teleports = []
+for loc in cities["Locations"]:
+    teleports.append({
+        "Name": loc["Name"],
+        "Position": loc["Position"]
+    })
+with open(os.path.join(output_dirs["teleports"], "Teleports_Raman.json"), "w") as f:
+    json.dump(teleports, f, indent=4)
 
-# Create teleports folder
-teleports_dir = "teleports"
-os.makedirs(teleports_dir, exist_ok=True)
+# 2. Airdrop JSON files
+for loc in cities["Locations"]:
+    config = airdrop_template.copy()
+    name = loc["Name"]
+    filename_safe_name = name.replace(" ", "_")
+    config["MissionName"] = f"Random_{name}"
+    config["DropLocation"]["x"] = loc["Position"][0]
+    config["DropLocation"]["z"] = loc["Position"][2]
+    config["DropLocation"]["Name"] = name
+    with open(os.path.join(output_dirs["airdrop_files"], f"Airdrop_Random_{filename_safe_name}.json"), "w") as f:
+        json.dump(config, f, indent=4)
 
-# Process all locations
-spawn_points = []
-roaming_locations = []
-contaminated_positions = []
-
+# 3. Contaminated Area JSON files
+contaminated_count = 0
 for loc in cities["Locations"]:
     name = loc["Name"]
-    x, y, z = loc["Position"]
-    
-    # 1. Generate Spawn Points
+    if any(keyword.lower() in name.lower() for keyword in contaminated_keywords):
+        config = contaminated_template.copy()
+        config["Name"] = name
+        config["Data"]["Pos"] = loc["Position"]
+        filename_safe_name = name.replace(" ", "_")
+        with open(os.path.join(output_dirs["contaminated_areas_files"], f"ContaminatedArea_{filename_safe_name}.json"), "w") as f:
+            json.dump(config, f, indent=4)
+        contaminated_count += 1
+
+# 4. spawn_points.py
+spawn_points = []
+for loc in cities["Locations"]:
     spawn_points.append({
-        "Name": name,
-        "Positions": [[x, y, z]],
+        "Name": loc["Name"],
+        "Positions": [loc["Position"]],
         "UseCooldown": 1
     })
-    
-    # 2. Generate Roaming Locations
+with open(os.path.join(output_dirs["spawn_points"], "spawn_points.py"), "w") as f:
+    f.write("# Spawn points generated from Raman City Locations\n")
+    f.write("spawn_points = [\n")
+    for loc in spawn_points:
+        loc_str = json.dumps(loc, indent=4)[1:-1].strip()
+        f.write("    {\n")
+        f.write(f"{loc_str}\n")
+        f.write("    },\n")
+    f.write("]\n")
+
+# 5. roaming_locations.py
+roaming_locations = []
+for loc in cities["Locations"]:
     radius = 500.0 if loc["Type"] == "CityCap" else 100.0
-    roaming_locations.append({
-        "Name": name,
-        "Position": [x, y, z],
+    roaming_loc = {
+        "Name": loc["Name"],
+        "Position": loc["Position"],
         "Radius": radius,
         "Type": loc["Type"] if loc["Type"] else "Local",
         "Enabled": 1
-    })
-    
-    # 3. Generate Contaminated Areas (Teleports and XML)
-    if any(keyword.lower() in name.lower() for keyword in contaminated_keywords):
-        # Teleports JSON
-        teleport_config = teleport_template.copy()
-        teleport_config["Name"] = f"Contaminated_{name}"
-        teleport_config["TelePos"] = {"x": x, "y": y, "z": z}
-        teleport_file = os.path.join(teleports_dir, f"Teleports_{MAP_NAME}_{name.replace(' ', '_')}.json")
-        with open(teleport_file, "w") as f:
-            json.dump(teleport_config, f, indent=4)
-        
-        # Contaminated Areas XML
-        contaminated_positions.append(f'  <pos x="{x:.6f}" z="{z:.6f}" />')
-
-# Write Spawn Points
-with open("spawn_points.py", "w") as f:
-    f.write("# Spawn points for Raman City\n")
-    f.write("spawn_points = [\n")
-    for sp in spawn_points:
-        f.write(f"    {json.dumps(sp, indent=4).replace('    ', '        ')[4:-1]},\n")
-    f.write("]\n")
-
-# Write Roaming Locations
+    }
+    roaming_locations.append(roaming_loc)
 roaming_template["RoamingLocations"] = roaming_locations
-with open("roaming_locations.py", "w") as f:
-    f.write("# Roaming locations for Raman City\n")
+with open(os.path.join(output_dirs["roaming_locations"], "roaming_locations.py"), "w") as f:
+    f.write("# Roaming locations generated from Raman City Locations\n")
     f.write("roaming_locations = ")
     f.write(json.dumps(roaming_template, indent=4))
     f.write("\n")
 
-# Write Contaminated Areas XML
-with open("contaminated_areas.xml", "w") as f:
+# 6. contaminated_areas.xml
+contaminated_positions = []
+for loc in cities["Locations"]:
+    name = loc["Name"]
+    if any(keyword.lower() in name.lower() for keyword in contaminated_keywords):
+        x_coord = loc["Position"][0]
+        z_coord = loc["Position"][2]
+        pos_line = f'  <pos x="{x_coord:.6f}" z="{z_coord:.6f}" />'
+        contaminated_positions.append(pos_line)
+with open(os.path.join(output_dirs["contaminated_areas_xml"], "contaminated_areas.xml"), "w") as f:
     f.write('<event name="StaticContaminatedArea">\n')
     for line in contaminated_positions:
         f.write(line + "\n")
     f.write('</event>\n')
 
-print(f"Generated:")
-print(f"- {len(spawn_points)} spawn points in 'spawn_points.py'")
-print(f"- {len(roaming_locations)} roaming locations in 'roaming_locations.py'")
-print(f"- {len(contaminated_positions)} contaminated areas in 'contaminated_areas.xml' and 'teleports' folder")
+# Summary
+print(f"Generated files:")
+print(f"- {output_dirs['teleports']}/Teleports_Raman.json with {len(cities['Locations'])} entries")
+print(f"- {len(cities['Locations'])} airdrop files in {output_dirs['airdrop_files']}")
+print(f"- {contaminated_count} contaminated area files in {output_dirs['contaminated_areas_files']}")
+print(f"- {output_dirs['spawn_points']}/spawn_points.py with {len(spawn_points)} entries")
+print(f"- {output_dirs['roaming_locations']}/roaming_locations.py with {len(roaming_locations)} entries")
+print(f"- {output_dirs['contaminated_areas_xml']}/contaminated_areas.xml with {len(contaminated_positions)} positions")
